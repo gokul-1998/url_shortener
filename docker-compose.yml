@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+    restart: unless-stopped
+    volumes:
+      - .:/app
+    # Uncomment the following lines if you want to add a PostgreSQL container
+    # depends_on:
+    #   - db
+    
+  # Uncomment this section if you want to run PostgreSQL in a container
+  # db:
+  #   image: postgres:13-alpine
+  #   environment:
+  #     - POSTGRES_DB=your_db_name
+  #     - POSTGRES_USER=your_db_user
+  #     - POSTGRES_PASSWORD=your_db_password
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data/
+  #   ports:
+  #     - "5432:5432"
+
+# volumes:
+#   postgres_data:

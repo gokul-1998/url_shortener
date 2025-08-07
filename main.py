@@ -1,63 +1,62 @@
-# filename: main.py
-
-from fastapi import FastAPI, Request, HTTPException, Form
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse
-import sqlite3
-import string
-import random
 from pydantic import BaseModel
+import string, random
+
+from database import database, URL
 
 app = FastAPI()
 
-# SQLite setup
-conn = sqlite3.connect("urls.db", check_same_thread=False)
-cursor = conn.cursor()
-cursor.execute("""
-    CREATE TABLE IF NOT EXISTS urls (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        short_code TEXT UNIQUE,
-        long_url TEXT
-    )
-""")
-conn.commit()
+# Connect to DB on startup and shutdown
+@app.on_event("startup")
+async def startup():
+    await database.connect()
 
-# Model for shortening request
+@app.on_event("shutdown")
+async def shutdown():
+    await database.disconnect()
+
+# Request model
 class URLRequest(BaseModel):
     url: str
 
-# Base domain (change this to your custom domain)
 BASE_DOMAIN = "http://localhost:8000"
 
-# Function to generate short code
-def generate_short_code(length=6):
+# Generate short code
+async def generate_short_code(length=6):
     characters = string.ascii_letters + string.digits
     while True:
         short_code = ''.join(random.choices(characters, k=length))
-        cursor.execute("SELECT * FROM urls WHERE short_code=?", (short_code,))
-        if not cursor.fetchone():
+        query = URL.__table__.select().where(URL.short_code == short_code)
+        existing = await database.fetch_one(query)
+        if not existing:
             return short_code
 
-# API to shorten URL
+# Shorten API
 @app.post("/shorten")
 async def shorten_url(request: URLRequest):
     long_url = request.url
+
     # Check if URL already exists
-    cursor.execute("SELECT short_code FROM urls WHERE long_url=?", (long_url,))
-    row = cursor.fetchone()
-    if row:
-        short_code = row[0]
+    query = URL.__table__.select().where(URL.long_url == long_url)
+    existing = await database.fetch_one(query)
+
+    if existing:
+        short_code = existing["short_code"]
     else:
-        short_code = generate_short_code()
-        cursor.execute("INSERT INTO urls (short_code, long_url) VALUES (?, ?)", (short_code, long_url))
-        conn.commit()
+        short_code = await generate_short_code()
+        insert_query = URL.__table__.insert().values(short_code=short_code, long_url=long_url)
+        await database.execute(insert_query)
+
     short_url = f"{BASE_DOMAIN}/{short_code}"
     return {"short_url": short_url}
 
 # Redirect handler
 @app.get("/{short_code}")
 async def redirect_url(short_code: str):
-    cursor.execute("SELECT long_url FROM urls WHERE short_code=?", (short_code,))
-    row = cursor.fetchone()
+    query = URL.__table__.select().where(URL.short_code == short_code)
+    row = await database.fetch_one(query)
+
     if row:
-        return RedirectResponse(row[0])
+        return RedirectResponse(url=row["long_url"])
     raise HTTPException(status_code=404, detail="URL not found")
